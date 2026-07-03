@@ -16,21 +16,31 @@
 
 ## 対策
 
-このメールは `2026-06-28（日） 20:10〜` / `お試し全身ボディケア90分` のように**書式が固定**なので、AI ではなく**正規表現で機械的に抽出**する [`zapier/code-step.js`](zapier/code-step.js) に置き換える。日時は `+09:00` 付き ISO8601 で出力するため、タイムゾーンの取り違えが起きない。
+Zap は「会議・予約全般」を対象にしているため、AI ステップは残しつつ、その直後に**検証ステップ** [`zapier/guard-step.js`](zapier/guard-step.js) を挟む:
+
+1. **既知の予約メール書式**（`2026-06-28（日） 20:10〜` + `NN分`、peakmanager 等）なら、AI の出力を使わず正規表現で確定する。
+2. **それ以外のメール**は AI の抽出結果を使うが、「AI が出した日付・時刻の文字列が本文に実在するか」を照合する。一致しなければイベントを作らず**エラーで停止**する（間違った予定を静かに登録するより、Zapier の失敗通知の方が安全）。
+
+日時はいずれも `+09:00` 付き ISO8601 で出力するため、タイムゾーンの取り違えが起きない。
+
+単一の固定書式だけを扱う簡易版は [`zapier/code-step.js`](zapier/code-step.js)（AI ステップ自体を置き換える場合に使用）。
 
 ## Zapier 設定手順
 
 1. **Trigger**: Gmail → *New Email Matching Search*
-   - Search String 例: `from:(予約確認の送信元) subject:(ご予約)`
-2. **Action**: Code by Zapier → *Run JavaScript*
-   - **Input Data** に以下を設定:
+   - 対象メールが届く条件を設定（例: `subject:(ご予約 OR 予約確認 OR 打ち合わせ)`）。特定送信元に絞らない。
+2. **Filter / AI by Zapier**: 既存のまま
+3. **Action（追加）**: Code by Zapier → *Run JavaScript* — AI ステップの直後に挿入
+   - **Input Data**:
      - `emailBody` = Gmail トリガーの **Body Plain**（プレーンテキスト本文）
-     - `emailSubject` = Gmail トリガーの **Subject**（任意）
-   - **Code** 欄に [`zapier/code-step.js`](zapier/code-step.js) の中身をそのまま貼り付け
-3. **Action**: Google Calendar → *Create Detailed Event*
-   - **Summary** = ステップ2の出力 `title`
-   - **Start Date & Time** = ステップ2の出力 `startDateTime`
-   - **End Date & Time** = ステップ2の出力 `endDateTime`
+     - `aiStart` = AI ステップの開始日時フィールド
+     - `aiEnd` = AI ステップの終了日時フィールド（任意）
+     - `aiTitle` = AI ステップのタイトルフィールド（任意）
+   - **Code** 欄に [`zapier/guard-step.js`](zapier/guard-step.js) の中身をそのまま貼り付け
+4. **Action**: Google Calendar → *Create Detailed Event*
+   - **Summary** = 検証ステップの出力 `title`
+   - **Start Date & Time** = 検証ステップの出力 `startDateTime`
+   - **End Date & Time** = 検証ステップの出力 `endDateTime`
    - ※ Google Calendar アクション側の **Timezone は空欄**にする。`startDateTime` / `endDateTime` に `+09:00` が含まれており、二重指定すると再びズレる原因になる。
 
 ## Code ステップの出力フィールド
@@ -48,7 +58,8 @@
 ## テスト
 
 ```bash
+node zapier/guard-step.test.js
 node zapier/code-step.test.js
 ```
 
-実際の予約メールを元に、`6/28 20:10–21:40（90分）` へ正しく変換されること、深夜またぎ（23:30+90分→翌01:00）が正しいことを検証する。
+実際の予約メールを元に `6/28 20:10–21:40（90分）` へ正しく変換されること、AI が時刻・日付を取り違えた場合に検証で停止すること、深夜またぎ（23:30+90分→翌01:00）が正しいことを検証する。
