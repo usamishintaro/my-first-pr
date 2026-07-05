@@ -1,8 +1,12 @@
 /**
- * 最小版: 日時のズレだけを直す Code ステップ。
+ * 最小版: 日時のズレだけを直す Code ステップ（サイレントスキップ版）。
  * AI ステップの直後に置き、Google Calendar の Start/End だけを
  * このステップの startDateTime / endDateTime に差し替える。
- * タイトル・場所など他のフィールドは従来どおり AI ステップの値を使う。
+ *
+ * 日時を安全に特定できないメールは、エラーを投げる代わりに
+ * startDateTime を空で返す。直後の Filter ステップで
+ * 「startDateTime が存在する場合のみ続行」とすることで、
+ * エラー通知メールを出さずに登録だけを止められる。
  *
  * Input Data:
  *   emailBody = Gmail トリガーの「Body Plain」
@@ -16,6 +20,12 @@ function fixTimes(input) {
     `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}T${pad(
       t.getUTCHours()
     )}:${pad(t.getUTCMinutes())}:00+09:00`;
+  // 登録しない場合の出力。Filter ステップが startDateTime 空を見て止める。
+  const SKIP = (reason) => ({
+    startDateTime: '',
+    endDateTime: '',
+    status: 'skip: ' + reason,
+  });
 
   // 本文に日時が明記されていればそれを最優先（例: 2026-06-28（日） 20:10〜）
   let y, mo, d, h, mi;
@@ -25,16 +35,14 @@ function fixTimes(input) {
   if (dt) {
     [, y, mo, d, h, mi] = dt.map(Number);
   } else {
-    // 本文に定型が無ければ AI の値を使うが、時刻が本文に実在するか照合する
+    // 定型が無ければ AI の値を使うが、時刻が本文に実在するか照合する
     const m = String(input.aiStart || '').match(
       /(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T ](\d{1,2}):(\d{2})/
     );
-    if (!m) throw new Error('開始日時を特定できません: ' + input.aiStart);
+    if (!m) return SKIP('開始日時を特定できず');
     [, y, mo, d, h, mi] = m.map(Number);
     if (!new RegExp(`(^|[^\\d])(${h}|${pad(h)}):${pad(mi)}`).test(body)) {
-      throw new Error(
-        `AIの開始時刻 ${pad(h)}:${pad(mi)} が本文にありません（時刻取り違えの可能性）。登録を中止します。`
-      );
+      return SKIP(`AIの時刻 ${pad(h)}:${pad(mi)} が本文に無い`);
     }
   }
   const start = new Date(Date.UTC(y, mo - 1, d, h, mi));
@@ -55,7 +63,7 @@ function fixTimes(input) {
     if (!end || end <= start) end = new Date(start.getTime() + 60 * 60000);
   }
 
-  return { startDateTime: fmt(start), endDateTime: fmt(end) };
+  return { startDateTime: fmt(start), endDateTime: fmt(end), status: 'ok' };
 }
 
 // ===== Zapier 実行部 =====

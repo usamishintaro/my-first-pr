@@ -10,6 +10,7 @@ const peakBody =
 const r1 = fixTimes({ emailBody: peakBody, aiStart: '2026-06-29T10:10' });
 assert.strictEqual(r1.startDateTime, '2026-06-28T20:10:00+09:00');
 assert.strictEqual(r1.endDateTime, '2026-06-28T21:40:00+09:00');
+assert.strictEqual(r1.status, 'ok');
 
 // 2. 定型なし + AIが正しい → そのまま採用
 const mtg = '打ち合わせは 7月10日 14:00 より1時間。';
@@ -17,10 +18,14 @@ const r2 = fixTimes({ emailBody: mtg, aiStart: '2026-07-10T14:00', aiEnd: '2026-
 assert.strictEqual(r2.startDateTime, '2026-07-10T14:00:00+09:00');
 assert.strictEqual(r2.endDateTime, '2026-07-10T15:00:00+09:00');
 
-// 3. 定型なし + AIが時刻取り違え → 登録せず停止
-assert.throws(
-  () => fixTimes({ emailBody: mtg, aiStart: '2026-07-10T02:00' }),
-  /時刻取り違え/
-);
+// 3. 定型なし + AIが時刻取り違え → エラーではなく空でスキップ
+const r3 = fixTimes({ emailBody: mtg, aiStart: '2026-07-10T02:00' });
+assert.strictEqual(r3.startDateTime, '', '取り違え時はスキップ');
+assert.match(r3.status, /skip/);
+
+// 4. 予約と無関係なメール（aiStart未設定・日時なし）→ エラーではなく空でスキップ
+const r4 = fixTimes({ emailBody: 'Googleからのお知らせです。', aiStart: undefined });
+assert.strictEqual(r4.startDateTime, '', '無関係メールはスキップ');
+assert.match(r4.status, /skip/);
 
 console.log('✅ time-fix-step: すべてのテストに合格しました');
